@@ -1,0 +1,6 @@
+.DS_Store/
+.claude/
+
+# Third-party clone reused only for the prebuilt ezinject/libphp/hookfactory
+# see README
+lginputhook-ref/
