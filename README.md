@@ -2,12 +2,12 @@
 
 This script disables the pointer on LG Magic Remotes on rooted webOS LG TVs at boot time.
 
-Use at your own risk. There's no code modification on the TV so it _should_ be safe. The script simply injects a hook into a running system process to no-op the system pointer functions at boot time. I tested this on my TV (2019 C9 OLED) and am mostly satisfied with it (see [known issues](#known-issues)).
+Use at your own risk. There's no code modification on the TV and is completely reversable so it _should_ be safe. The script simply injects a hook into a running system process to no-op the system pointer functions at boot time. I tested this on my TV (2019 C9 OLED) and am mostly satisfied with it (see [known issues](#known-issues)).
 
 
 ## Why?
 
-I built this mainly as a learning exercise and because I hated the pointer showing up unexpectedly, which then triggered some player UI or TV menu. I've tried different solutions to disable the pointer but nothing was robust enough or as seamless as I wanted. I was using a dumb IR universal remote that worked great, but some of the buttons started failing after a while.
+I built this because I hated the pointer showing up unexpectedly (like when sitting on the couch and the remote moves), which then triggered some player UI or TV menu. I've tried different solutions to disable the pointer but nothing was robust enough or as seamless as I wanted. I was using a dumb IR universal remote that worked great, but I still preferred the design and feel of the Magic Remote.
 
 ## How it works
 
@@ -19,7 +19,7 @@ separate functions:
 - `lginput_uinput_send_custom_event` — the LG cursor on/off keys
 - `lginput_uinput_send_button` — the real buttons
 
-We inject a hook (via [`ezinject`](https://github.com/smx-smx/ezinject)) into the running `lginput2` that turns the first three functions into no-ops and leaves `send_button` alone. Injection uses [ptrace](https://man7.org/linux/man-pages/man2/ptrace.2.html) to load a small PHP hook via [`lginputhook`](https://github.com/Simon34545/lginputhook)'s `libphp` + [Frida-Gum](https://github.com/frida/frida-gum) `hookfactory`.
+Inject a hook (via [`ezinject`](https://github.com/smx-smx/ezinject)) into the running `lginput2` that turns the first three functions into no-ops and leaves `send_button` alone. Injection uses [ptrace](https://man7.org/linux/man-pages/man2/ptrace.2.html) to load a small PHP hook via [`lginputhook`](https://github.com/Simon34545/lginputhook)'s `libphp` + [Frida-Gum](https://github.com/frida/frida-gum) `hookfactory`.
 
 
 At boot time, `/var/lib/webosbrew/init.d/disable-magic-pointer` launches `inject-pointer-hook.sh`, which waits
@@ -78,16 +78,12 @@ ssh root@YOUR_TV_IP 'rm -rf /home/root/magic-pointer'
   - **Fix:** Open webOS Homebrew Channel app and go into settings and make sure root is on,
     then reboot the TV.
 
-- The remote buttons may become unresponsive, except for the power button. I've had this happen a couple
-  of times, but not sure why it happens.
-  - **Fix:** Power cycle the remote by pulling out the batteries for a few seconds and reinserting. Worst case,
-    power cycle the TV. 
+- The remote buttons may become unresponsive, except for the power button.
+  - **Fix:** Power cycle the remote by pulling out a battery for a few seconds and reinserting.
 
 - If the pointer comes on right before the hook, you'll have a frozen pointer on the screen for about 30 seconds
   until it disappears. The pointer may prevent you from using the d-pad to navigate depending on where the 
   pointer last froze on the screen.
   - **Fix:** Just wait it out, the pointer will disappear.
 
-## Project commentary 
 
-I used Claude to build this and it took a lot more hand holding and steering than I would have liked. Claude first proposed rebuilding the input service from scratch to no-op the pointer, which didn't work at all on device. After a nauseating and infuriating amount of claude-isms (you're absolutely right, honest take, load-bearing, papering over, ahhh!!), I was able to steer Claude to a workable solution by reusing existing work from the webOS Homebrew community and other open source projects. I ended up with a few bash scripts, no decompilation of firmware needed.
