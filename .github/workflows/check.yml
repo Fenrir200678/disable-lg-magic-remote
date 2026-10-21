@@ -1,0 +1,19 @@
+name: Checks
+
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+  deployment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check shell syntax
+        run: |
+          for script in deploy.sh build-injector.sh package-release.sh scripts/toolkit.sh tv/*.sh tests/*.sh; do
+            sh -n "$script"
+          done
+      - name: Test deployment and release verification without a TV
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v

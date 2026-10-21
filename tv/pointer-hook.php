@@ -26,19 +26,25 @@ $targets = array(
                                           // cursor on/off (0x4ae/0x4af)
 );
 
+// Validate all symbols before installing any hooks.
 foreach ($targets as $fn) {
-    if ($hf->hasSymbol($fn)) {
-        // No-op replacement: ignore args, return 0, don't call the original. 
-        // (void) signature is safe on ARM AAPCS for a no-op (caller cleans 
-        // up the stack).
-        $hf->newHook("int (*)(void)", $fn, function ($orig) { return 0; });
-        logmsg("no-op hook installed: $fn");
-    } else {
-        logmsg("symbol NOT found (skipped): $fn");
+    if (!$hf->hasSymbol($fn)) {
+        throw new RuntimeException("required symbol NOT found: $fn");
     }
 }
 
+foreach ($targets as $fn) {
+    // No-op replacement: ignore args, return 0, don't call the original.
+    // (void) signature is safe on ARM AAPCS for a no-op (caller cleans
+    // up the stack).
+    $hf->newHook("int (*)(void)", $fn, function ($orig) { return 0; });
+    logmsg("no-op hook installed: $fn");
+}
+
 logmsg("pointer-hook installed; pointer should be disabled");
+if (file_put_contents('/tmp/magic-pointer-ready-' . getmypid(), "installed\n") === false) {
+    throw new RuntimeException('could not write hook readiness marker');
+}
 
 // Keep the injected thread alive to keep hooks active
 while (true) {

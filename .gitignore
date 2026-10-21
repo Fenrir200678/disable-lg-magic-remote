@@ -4,3 +4,10 @@
 # Third-party clone reused only for the prebuilt ezinject/libphp/hookfactory
 # see README
 lginputhook-ref/
+
+# Locally built modern injector, sources, and build products
+.build/
+
+# Python test cache
+__pycache__/
+*.py[cod]
