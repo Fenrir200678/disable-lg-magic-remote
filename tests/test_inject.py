@@ -1,6 +1,7 @@
 """Behavioral tests for the boot injector using a disposable process fixture."""
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
@@ -22,9 +23,10 @@ class InjectorTests(unittest.TestCase):
         self.tmp.mkdir()
         (self.proc / "uptime").write_text("123.45 67.89\n")
         self.dir = self.base / "inputhook"
-        (self.dir / "libcrypt1").mkdir(parents=True)
+        for variant in ("libcrypt1", "libcrypt2"):
+            (self.dir / variant).mkdir(parents=True)
         for file in ("ezinject", "hookfactory.php", "pointer-hook.php",
-                     "libcrypt1/libphp.so"):
+                     "libcrypt1/libphp.so", "libcrypt2/libphp.so"):
             (self.dir / file).write_text("fixture\n")
         (self.dir / "toolkit-mode").write_text("legacy\n")
         self.pid = "4289"
@@ -36,11 +38,16 @@ class InjectorTests(unittest.TestCase):
         self.sleep_log = self.base / "sleep.log"
         self.script = self.base / "inject-pointer-hook.sh"
         source = (ROOT / "tv/inject-pointer-hook.sh").read_text()
-        source = source.replace("/proc/", f"{self.proc}/")
-        source = source.replace("/tmp/", f"{self.tmp}/")
-        source = source.replace("DIR=/home/root/magic-pointer/inputhook", f"DIR={self.dir}")
-        source = source.replace("LOG=/home/root/magic-pointer/inject.log", f"LOG={self.base}/inject.log")
-        source = source.replace("/home/root/magic-pointer/module.log", f"{self.base}/module.log")
+        replacements = {
+            "/proc/": f"{self.proc}/",
+            "/tmp/": f"{self.tmp}/",
+            "/home/root/magic-pointer/inputhook": str(self.dir),
+            "/home/root/magic-pointer/inject.log": str(self.base / "inject.log"),
+            "/home/root/magic-pointer/module.log": str(self.base / "module.log"),
+        }
+        # Substitute in one pass so inserted /tmp paths are never rewritten.
+        source = re.sub("|".join(map(re.escape, replacements)),
+                        lambda match: replacements[match.group()], source)
         self.script.write_text(source)
         self.script.chmod(0o755)
         self.command("pidof", '''
@@ -104,7 +111,8 @@ kill() {{
         printf 'installed settings-dpad-v1\\n' > "{self.tmp}/magic-pointer-ready-{self.pid}"
     fi
 }}
-. "{self.script}" --once
+set -- --once
+. "{self.script}"
 ''')
         wrapper.chmod(0o755)
         env = dict(os.environ, PATH=str(self.bin) + os.pathsep + os.environ["PATH"],
@@ -112,7 +120,8 @@ kill() {{
                    PIDOF_LOG=str(self.pidof_log), EZINJECT_LOG=str(self.ezinject_log),
                    SLEEP_LOG=str(self.sleep_log), PID_MODE="single", EZ_MODE="ready")
         env.update(extra)
-        return subprocess.run(["/bin/sh", str(wrapper)], env=env, capture_output=True, text=True)
+        return subprocess.run([env.get("TEST_SHELL", "/bin/sh"), str(wrapper)],
+                              env=env, capture_output=True, text=True, timeout=15)
 
     def calls(self):
         return self.ezinject_log.read_text().splitlines() if self.ezinject_log.exists() else []
