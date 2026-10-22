@@ -1,18 +1,20 @@
 # Disable the LG Magic Remote pointer
 
-This toolkit disables the on-screen pointer from an LG Magic Remote on a rooted LG webOS TV. It installs a boot hook that injects into the TV's `lginput2` process and suppresses pointer movement, wheel events, and the cursor on/off custom events. Physical buttons remain available. The scroll wheel is intentionally disabled along with pointer input.
+This toolkit disables the on-screen pointer from an LG Magic Remote on a rooted LG webOS TV. It installs a boot hook that injects into the TV's `lginput2` process and suppresses pointer movement and wheel events. Cursor-on requests become native cursor-off events so menus can return to D-pad navigation. Physical buttons remain available. The scroll wheel is intentionally disabled along with pointer input.
 
 Many thanks to **bciuca** for [the original disable-lg-magic-remote project](https://github.com/bciuca/disable-lg-magic-remote), which inspired this fork and provided its working foundation. This version adds support for newer glibc versions, a current injector with a PHP ABI bridge, and verified release downloads. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for credits and component notices.
 
 ## How it works
 
-The TV's `lginput2` service exports the relevant input functions. The injector hooks these three functions and makes them return without handling the event:
+The TV's `lginput2` service exports the relevant input functions. The injector hooks these three functions:
 
-- `lginput_uinput_send_position` — pointer position
-- `lginput_uinput_send_wheel` — scroll wheel
-- `lginput_uinput_send_custom_event` — including the cursor on/off keys
+- `lginput_uinput_send_position` — suppress pointer position
+- `lginput_uinput_send_wheel` — suppress scroll wheel
+- `lginput_uinput_send_custom_event` — change LG event ID 4 (cursor on) to 5 (cursor off); forward cursor-off, disconnect, and other events unchanged, with their original arguments
 
-The button function, `lginput_uinput_send_button`, is left untouched. Injection uses [ezinject](https://github.com/smx-smx/ezinject). The legacy path uses the pinned `lginputhook` PHP library and hook factory. The modern path uses a small native bridge to load the PHP library with the current injector ABI.
+The button function, `lginput_uinput_send_button`, is left untouched. Injection uses [ezinject](https://github.com/smx-smx/ezinject) and the pinned `lginputhook` PHP library. The modern path uses a small native bridge to load the PHP library with the current injector ABI. The PHP hook checks Gum replacement results and retains callback storage after live rollback.
+
+The previous version discarded both cursor-on and cursor-off events, which could leave Settings in pointer mode: a frozen cursor appeared and OK clicked its last position. With the corrected hook on the tested LG G4, Settings still initially shows a centered pointer. The first D-pad press removes it, and OK then selects the focused menu item correctly, including after reopening Settings. Completely preventing that initial appearance remains unresolved. The user also confirmed D-pad and OK operation in Glasshouse, a normal app, and on an HDMI input. Standby and cold-start behavior have not yet been verified with the corrected hook.
 
 A boot hook starts a watcher that waits for `lginput2`, injects the hooks, and watches for the process to respawn. The pointer may appear briefly before injection completes.
 
@@ -75,19 +77,19 @@ The legacy injector depends on private glibc internals that are unavailable star
 
 The modern injection path works on this configuration:
 
-| Component | Tested version |
-| --- | --- |
-| TV | LG OLED G4 |
-| Model | `OLED65G49LS.DEUQL.JP` |
-| Firmware | `43.21.73` |
-| webOS | webOS 26 |
-| SDK | `11.2.0-3703` |
-| Kernel | Linux `6.12.44-352`, ARM64 / aarch64 |
-| `lginput2` | 32-bit ARM EABI5 soft-float |
-| glibc | `2.39` |
-| Access | Root SSH |
+| Component  | Tested version                       |
+| ---------- | ------------------------------------ |
+| TV         | LG OLED G4                           |
+| Model      | `OLED65G49LS.DEUQL.JP`               |
+| Firmware   | `43.21.73`                           |
+| webOS      | webOS 26                             |
+| SDK        | `11.2.0-3703`                        |
+| Kernel     | Linux `6.12.44-352`, ARM64 / aarch64 |
+| `lginput2` | 32-bit ARM EABI5 soft-float          |
+| glibc      | `2.39`                               |
+| Access     | Root SSH                             |
 
-Pointer suppression and physical button operation were confirmed on this TV. Injection and repeated deployment kept `lginput2`'s PID stable. Disposable ARM and Thumb test processes also retained their PIDs, with the three pointer functions suppressed and the simulated button function unchanged. Reboot behavior has not been tested. Other models and firmware versions may work if they meet the requirements, but have not been verified here.
+Pointer suppression and physical button operation were confirmed on this TV with the original hook, including persistence across TV restarts. With the corrected hook, it's confirmed that D-pad navigation and OK work correctly in Settings after the first arrow press, including after reopening the menu. Autostart and the watcher are enabled; standby and cold-start persistence of the corrected hook have not yet been tested. Other models and firmware versions may work if they meet the requirements, but have not been verified here.
 
 ## Troubleshooting
 
@@ -105,13 +107,19 @@ If the boot hook does not run, check that root access is enabled in the webOS Ho
 
 ## Uninstall
 
-Remove the boot hook and reboot the TV to restore the normal pointer behavior:
+For the current hook, restore native input immediately and disable this toolkit's autostart:
 
 ```sh
-ssh root@TV-IP 'rm -f /var/lib/webosbrew/init.d/disable-magic-pointer; reboot'
+./rollback.sh root@TV-IP
+# or directly on the TV:
+ssh root@TV-IP 'sh /home/root/magic-pointer/restore-magic-pointer.sh'
 ```
 
-Optionally remove the installed toolkit files:
+Rollback restores the original native functions without restarting the input service or the TV. The PHP thread remains loaded until the process exits, so callback storage is retained safely. The watcher and this project's boot hook are disabled. Reinjecting into that same process is refused; enable suppression again only after a fresh `lginput2` process is available.
+
+Older installed hooks have no live rollback channel. Updating PHP files on disk cannot change their in-memory hooks. Deployment detects an older readiness marker and refuses double injection; a separately planned service restart or TV restart is needed to load the corrected version.
+
+Once native input has been restored, optionally remove the installed toolkit files:
 
 ```sh
 ssh root@TV-IP 'rm -rf /home/root/magic-pointer'

@@ -25,14 +25,19 @@ inject() {
     # Guard against double-injection (otherwise lginput2 crashes): skip if libphp is
     # already mapped into it.
     if grep -q libphp "/proc/$LP/maps" 2>/dev/null; then
-        if [ -f "/tmp/magic-pointer-ready-$LP" ]; then
+        if [ -f "/tmp/magic-pointer-reverted-$LP" ]; then
+            echo "lginput2=$LP was rolled back; refusing reinjection into the same process"
+            return 1
+        fi
+        if grep -q '^installed settings-dpad-v1$' "/tmp/magic-pointer-ready-$LP" 2>/dev/null; then
             echo "lginput2=$LP already has the hook; skipping"
             return 0
         fi
-        echo "libphp is loaded without a ready marker; refusing double-injection"
+        echo "libphp is loaded without the current hook marker; refusing double-injection"
+        echo "An older hook needs a fresh lginput2 process; no service restart attempted."
         return 1
     fi
-    rm -f "/tmp/magic-pointer-ready-$LP"
+    rm -f "/tmp/magic-pointer-ready-$LP" "/tmp/magic-pointer-revert-$LP" "/tmp/magic-pointer-reverted-$LP"
     echo "injecting into lginput2=$LP (uptime=$(cut -d. -f1 /proc/uptime)s)"
     if [ "$MODE" = modern ]; then
         "$DIR/ezinject" -l /home/root/magic-pointer/module.log "$LP" \
@@ -46,7 +51,7 @@ inject() {
     while [ "$attempt" -lt 15 ]; do
         NP=$(pidof lginput2)
         [ "$NP" = "$LP" ] || { echo "ERROR: lginput2 changed $LP -> $NP during injection"; return 1; }
-        if [ -f "/tmp/magic-pointer-ready-$LP" ] && grep -q libphp "/proc/$LP/maps" 2>/dev/null; then
+        if grep -q '^installed settings-dpad-v1$' "/tmp/magic-pointer-ready-$LP" 2>/dev/null && grep -q libphp "/proc/$LP/maps" 2>/dev/null; then
             echo "OK: all hooks ready, lginput2 still $LP (not restarted)"
             return 0
         fi

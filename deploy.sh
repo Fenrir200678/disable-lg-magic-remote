@@ -119,6 +119,7 @@ echo "==> $TV uses $LC"
 # Validate the entire payload before creating or changing files on the TV.
 for file in "$EZINJECT" ${BRIDGE:+"$BRIDGE"} "$IH/hookfactory.php" "$IH/$LC/libphp.so" \
     "$HERE/tv/pointer-hook.php" "$HERE/tv/inject-pointer-hook.sh" \
+    "$HERE/tv/restore-magic-pointer.sh" \
     "$HERE/tv/disable-magic-pointer.sh"; do
     if [ ! -s "$file" ] || [ ! -r "$file" ]; then
         echo "ERROR: missing, empty, or unreadable deployment file: $file" >&2
@@ -152,6 +153,7 @@ push "$IH/hookfactory.php"               "/home/root/magic-pointer/inputhook/hoo
 push "$IH/$LC/libphp.so"                 "/home/root/magic-pointer/inputhook/$LC/libphp.so"
 push "$HERE/tv/pointer-hook.php"         "/home/root/magic-pointer/inputhook/pointer-hook.php"
 push "$HERE/tv/inject-pointer-hook.sh"   "/home/root/magic-pointer/inject-pointer-hook.sh"
+push "$HERE/tv/restore-magic-pointer.sh" "/home/root/magic-pointer/restore-magic-pointer.sh"
 ssh "$TV" "chmod +x /home/root/magic-pointer/inputhook/ezinject \
     /home/root/magic-pointer/inject-pointer-hook.sh"
 
