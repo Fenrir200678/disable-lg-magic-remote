@@ -12,14 +12,15 @@ ssh "$TV" "mkdir '$REMOTE'"
 trap 'ssh "$TV" "rm -rf '\''$REMOTE'\''" >/dev/null 2>&1 || true' 0
 
 push() { ssh "$TV" "cat > '$REMOTE/$2'" < "$1"; }
-push "$HERE/.build/modern/ezinject" ezinject
+push "$HERE/.build/modern/ezinject" ezinject-real
 push "$HERE/.build/modern/libphpbridge.so" libphpbridge.so
 push "$HERE/.build/native/pointer-test-arm" pointer-test-arm
 push "$HERE/.build/native/pointer-test-thumb" pointer-test-thumb
 push "$HERE/lginputhook-ref/service/inputhook/$LC/libphp.so" libphp.so
 push "$HERE/lginputhook-ref/service/inputhook/hookfactory.php" hookfactory.php
 push "$HERE/tv/pointer-hook.php" pointer-hook.php
-ssh "$TV" "chmod +x '$REMOTE/ezinject' '$REMOTE/pointer-test-arm' '$REMOTE/pointer-test-thumb'"
+push "$HERE/tv/inject-pointer-hook.sh" inject-pointer-hook.sh
+ssh "$TV" "chmod +x '$REMOTE/ezinject-real' '$REMOTE/pointer-test-arm' '$REMOTE/pointer-test-thumb'"
 
 RESULT=0
 for MODE in arm thumb; do
@@ -52,8 +53,32 @@ grep -F -x "$BASE" "$DIR/target-$MODE.log" >/dev/null
 
 # The cleanup trap is active before injection, and owns only this target PID's
 # three markers and disposable process.
-"$DIR/ezinject" -l "$DIR/module-$MODE.log" "$P" "$DIR/libphpbridge.so" \
-    "$DIR/libphp.so" "$DIR/pointer-hook.php" "test-$MODE" > "$DIR/inject-$MODE.log" 2>&1
+# Exercise the production wrapper against this disposable PID. A private pidof
+# shim prevents it from ever discovering the real TV input service. Force the
+# observed post-detach group stop to make the regression deterministic.
+mkdir -p "$DIR/bin" "$DIR/libcrypt1" "$DIR/libcrypt2"
+ln -sf "$DIR/libphp.so" "$DIR/libcrypt1/libphp.so"
+ln -sf "$DIR/libphp.so" "$DIR/libcrypt2/libphp.so"
+echo modern > "$DIR/toolkit-mode"
+cat > "$DIR/bin/pidof" <<'PIDOF'
+#!/bin/sh
+echo "$TEST_TARGET_PID"
+PIDOF
+cat > "$DIR/ezinject" <<'INJECTOR'
+#!/bin/sh
+"$TEST_TARGET_DIR/ezinject-real" "$@"
+RESULT=$?
+kill -STOP "$TEST_TARGET_PID"
+exit "$RESULT"
+INJECTOR
+chmod +x "$DIR/bin/pidof" "$DIR/ezinject"
+sed -e "s|/home/root/magic-pointer/inputhook|$DIR|g" \
+    -e "s|/home/root/magic-pointer/inject.log|$DIR/inject-$MODE.log|g" \
+    -e "s|/home/root/magic-pointer/module.log|$DIR/module-$MODE.log|g" \
+    "$DIR/inject-pointer-hook.sh" > "$DIR/test-wrapper.sh"
+TEST_TARGET_PID=$P TEST_TARGET_DIR=$DIR PATH="$DIR/bin:$PATH" \
+    sh "$DIR/test-wrapper.sh" --once
+grep -q 'left stopped after injection; sending SIGCONT' "$DIR/inject-$MODE.log"
 ATTEMPT=0
 while ! grep -q '^installed settings-dpad-v1$' "$READY" 2>/dev/null && [ "$ATTEMPT" -lt 20 ]; do
     kill -0 "$P"
@@ -105,7 +130,7 @@ while [ "$ATTEMPT" -lt 12 ] && [ "$STABLE" -lt 2 ]; do
     ATTEMPT=$((ATTEMPT + 1))
 done
 test "$STABLE" -ge 2
-echo "PASS: $MODE settings hooks, cursor-state remap, argument forwarding, button passthrough, and live revert (PID $P)"
+echo "PASS: $MODE post-detach stop recovery, settings hooks, argument forwarding, buttons, and live revert (PID $P)"
 REMOTE_TEST
     then :; else RESULT=1; fi
     for LOG in target module inject; do

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Inject the pointer-disabling hook into the running lginput2 (via ezinject), and
-# keep it injected across any lginput2 respawn. This is non-disruptive. It does
-# not restart lginput2, so the Magic Remote's radio link is never disturbed
+# keep it injected across any lginput2 respawn. Injection briefly pauses the
+# process; it never restarts lginput2 or deliberately resets the radio link.
 # Launched detached at boot by the webosbrew hook (disable-magic-pointer).
 DIR=/home/root/magic-pointer/inputhook
 LOG=/home/root/magic-pointer/inject.log
@@ -19,9 +19,25 @@ case "$MODE" in
     *) echo "unknown toolkit mode: $MODE"; exit 1 ;;
 esac
 
+# ezinject uses SIGSTOP while attaching/running its payload. On the tested TV
+# it can exit after detach with a group stop still outstanding: even the PHP
+# worker cannot start until SIGCONT. Only recover our own injection target,
+# after ezinject exits, and never interfere with an attached debugger.
+resume_after_injection() {
+    [ "$(pidof lginput2)" = "$LP" ] || return 1
+    STATUS=$(cat "/proc/$LP/status" 2>/dev/null) || return 1
+    if printf '%s\n' "$STATUS" | grep -q '^State:[[:space:]]*T[[:space:]]' &&
+       printf '%s\n' "$STATUS" | grep -q '^TracerPid:[[:space:]]*0$'; then
+        echo "lginput2=$LP left stopped after injection; sending SIGCONT (no tracer)"
+        kill -CONT "$LP" || return 1
+    fi
+}
+
 inject() {
-    LP=$(pidof lginput2)
-    [ -n "$LP" ] || return 1
+    set -- $(pidof lginput2)
+    [ "$#" -eq 1 ] || { echo "ERROR: expected one lginput2 process"; return 1; }
+    LP=$1
+    case "$LP" in ''|*[!0-9]*) echo "ERROR: invalid lginput2 PID"; return 1 ;; esac
     # Guard against double-injection (otherwise lginput2 crashes): skip if libphp is
     # already mapped into it.
     if grep -q libphp "/proc/$LP/maps" 2>/dev/null; then
@@ -37,20 +53,32 @@ inject() {
         echo "An older hook needs a fresh lginput2 process; no service restart attempted."
         return 1
     fi
+    # Do not take ownership of a process somebody else stopped or is tracing.
+    STATUS=$(cat "/proc/$LP/status" 2>/dev/null) || return 1
+    if printf '%s\n' "$STATUS" | grep -q '^State:[[:space:]]*[Tt][[:space:]]' ||
+       ! printf '%s\n' "$STATUS" | grep -q '^TracerPid:[[:space:]]*0$'; then
+        echo "ERROR: lginput2=$LP already stopped or traced; refusing injection"
+        return 1
+    fi
     rm -f "/tmp/magic-pointer-ready-$LP" "/tmp/magic-pointer-revert-$LP" "/tmp/magic-pointer-reverted-$LP"
     echo "injecting into lginput2=$LP (uptime=$(cut -d. -f1 /proc/uptime)s)"
+    INJECT_RESULT=0
     if [ "$MODE" = modern ]; then
         "$DIR/ezinject" -l /home/root/magic-pointer/module.log "$LP" \
-            "$DIR/libphpbridge.so" "$LIBPHP" "$DIR/pointer-hook.php" lginput2 || return 1
+            "$DIR/libphpbridge.so" "$LIBPHP" "$DIR/pointer-hook.php" lginput2 || INJECT_RESULT=$?
     else
-        "$DIR/ezinject" "$LP" "$LIBPHP" "$DIR/pointer-hook.php" lginput2 || return 1
+        "$DIR/ezinject" "$LP" "$LIBPHP" "$DIR/pointer-hook.php" lginput2 || INJECT_RESULT=$?
     fi
+    # Run on failure too, so a failed injection cannot strand physical buttons.
+    resume_after_injection || return 1
+    [ "$INJECT_RESULT" -eq 0 ] || { echo "ERROR: injector exited $INJECT_RESULT; no retry in this process"; return 1; }
     # PHP runs on its own thread. Mapping libphp alone does not prove that
     # PHP has started or that the three hooks have been installed.
     attempt=0
     while [ "$attempt" -lt 15 ]; do
         NP=$(pidof lginput2)
         [ "$NP" = "$LP" ] || { echo "ERROR: lginput2 changed $LP -> $NP during injection"; return 1; }
+        resume_after_injection || return 1
         if grep -q '^installed settings-dpad-v1$' "/tmp/magic-pointer-ready-$LP" 2>/dev/null && grep -q libphp "/proc/$LP/maps" 2>/dev/null; then
             echo "OK: all hooks ready, lginput2 still $LP (not restarted)"
             return 0

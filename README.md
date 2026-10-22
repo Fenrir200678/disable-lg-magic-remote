@@ -93,7 +93,9 @@ Pointer suppression and physical button operation were confirmed on this TV with
 
 ## Troubleshooting
 
-The boot hook waits for `lginput2` to become ready. If the pointer is triggered during this interval, it can remain visible until injection finishes. A readiness marker is written as `/tmp/magic-pointer-ready-<lginput2 PID>` after all three hooks install successfully.
+The boot hook waits for `lginput2` to appear. If the pointer is triggered during this interval, it can remain visible until injection finishes. A readiness marker is written as `/tmp/magic-pointer-ready-<lginput2 PID>` after all three hooks install successfully.
+
+An intermittent startup failure was observed on the tested G4: ezinject detached, but `lginput2` remained in `State: T (stopped)` with `TracerPid: 0`. The PHP hook never became ready and input stopped responding. Sending `SIGCONT` to that same process resumed it and immediately completed hook startup. The injector wrapper now checks for this condition after its injector exits (including failure) and during the readiness wait, and resumes only its own target when no tracer is attached. It refuses a fresh injection into a process that was already stopped or traced. This recovery has been verified on the affected running TV; prevention across repeated cold starts still needs verification.
 
 For deployment or injection problems, inspect these logs on the TV:
 
